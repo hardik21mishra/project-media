@@ -1,0 +1,13 @@
+# Credentials and secrets
+oauth_credentials.json
+token.json
+.env
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.mp3
+*.wav
+*.mp4
+*.avi
+test_utf8_transcript.py

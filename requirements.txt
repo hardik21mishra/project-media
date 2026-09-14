@@ -1,0 +1,13 @@
+groq
+dotenv
+fastapi
+transcribe
+uvicorn
+python-multipart
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib
+google-auth
+yt-dlp
+uvicorn[standard]
+assemblyai
