@@ -35,16 +35,6 @@ def upload_to_drive(file_path):
     creds = get_drive_credentials()
     service = build("drive", "v3", credentials=creds)
 
-    folder = service.files().get(
-        fileId=FOLDER_ID,
-        fields="id,name,driveId,capabilities(canAddChildren),trashed",
-        supportsAllDrives=True,
-    ).execute()
-    if folder.get("trashed"):
-        raise RuntimeError(
-            f"Drive folder '{folder['name']}' is in the trash. Restore it or update FOLDER_ID."
-        )
-
     file_metadata = {
         "name": os.path.basename(file_path),
         "parents": [FOLDER_ID]
@@ -52,11 +42,26 @@ def upload_to_drive(file_path):
     media = MediaFileUpload(file_path, resumable=True)
 
     result = service.files().create(
-        body = file_metadata,
-        media_body = media, 
-        fields = "id",
+        body=file_metadata,
+        media_body=media,
+        fields="id, webContentLink",
         supportsAllDrives=True,
     ).execute()
 
-    print(f"Uploaded: {file_path}")
-    return result["id"]
+    file_id = result["id"]
+
+    # Make this file downloadable by anyone with the link
+    service.permissions().create(
+        fileId=file_id,
+        body={"type": "anyone", "role": "reader"},
+        supportsAllDrives=True,
+    ).execute()
+
+    # Re-fetch now that the permission is actually set
+    file = service.files().get(
+        fileId=file_id,
+        fields="webContentLink",
+        supportsAllDrives=True,
+    ).execute()
+
+    return file["webContentLink"]

@@ -9,7 +9,7 @@ aai.settings.api_key = os.getenv("ASSEMBLYAI_API_KEY")
 def transcribe_audio(audio_path):
     transcriber = aai.Transcriber()
     config = aai.TranscriptionConfig(
-        speech_model=aai.SpeechModel.best,
+        speech_models=["universal-3-5-pro", "universal-2"],
         language_detection=True,
         punctuate=True,
         format_text=True,
@@ -24,8 +24,4 @@ def transcribe_audio(audio_path):
     if not transcription.text or not transcription.text.strip():
         raise Exception("Transcription completed but no speech was detected in the audio.")
 
-    print(transcription.text)
     return transcription.text
-
-if __name__ == "__main__":
-    transcribe_audio("xyz_eng.mp3")
