@@ -7,4 +7,5 @@ google-auth-httplib2
 google-auth-oauthlib
 google-auth
 assemblyai
+groq
 yt-dlp
