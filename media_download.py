@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Any, cast
 
 import yt_dlp
 
@@ -9,7 +10,7 @@ class MediaDownloadError(RuntimeError):
 
 def download_media(url: str, output_dir: Path) -> Path:
     """Download the best available audio stream for one video URL."""
-    options = {
+    options: dict[str, Any] = {
         "format": "bestaudio/best",
         "outtmpl": str(output_dir / "source.%(ext)s"),
         "noplaylist": True,
@@ -21,7 +22,7 @@ def download_media(url: str, output_dir: Path) -> Path:
     }
 
     try:
-        with yt_dlp.YoutubeDL(options) as downloader:
+        with yt_dlp.YoutubeDL(cast(Any, options)) as downloader:
             info = downloader.extract_info(url, download=True)
             requested_downloads = info.get("requested_downloads") or []
 
