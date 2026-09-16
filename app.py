@@ -2,9 +2,11 @@ from fastapi import FastAPI, File, UploadFile, Form, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from html import escape
 from pathlib import Path
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 from drive_upload import upload_to_drive
+from media_download import MediaDownloadError, download_media
 from transcribe import transcribe_audio
 from video_audio import convert_video_to_audio
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -39,6 +41,16 @@ async def save_upload(file: UploadFile, path: Path) -> None:
         while chunk := await file.read(1024 * 1024):
             buffer.write(chunk)
 
+
+def validate_media_url(url: str) -> str:
+    parsed_url = urlsplit(url.strip())
+    if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide a valid HTTP(S) video URL.",
+        )
+    return parsed_url.geturl()
+
 def job_response(
     audio_path: Path,
     transcript_path: Path,
@@ -62,6 +74,39 @@ def transcribe_and_upload(job_id: str, audio_path: Path):
     audio_url = upload_to_drive(str(audio_path))
     transcript_url = upload_to_drive(str(transcript_path))
     return job_response(audio_path, transcript_path, audio_url, transcript_url)
+
+
+@app.post("/convert/url")
+async def convert_video_url(
+    url: str = Form(...),
+    output_format: str = Form("mp3"),
+):
+    """Download one video URL, convert its audio, and return audio/transcript links."""
+    output_format = output_format.lower().strip()
+    if output_format not in ALLOWED_OUTPUT_FORMATS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported output format. Choose one of: {sorted(ALLOWED_OUTPUT_FORMATS)}",
+        )
+
+    url = validate_media_url(url)
+    job_id = uuid4().hex
+    job_dir = OUTPUT_DIR / job_id
+    job_dir.mkdir()
+
+    try:
+        input_path = download_media(url, job_dir)
+        audio_path = convert_video_to_audio(
+            input_path=input_path,
+            output_dir=job_dir,
+            output_format=output_format,
+        )
+        input_path.unlink(missing_ok=True)
+        return transcribe_and_upload(job_id, audio_path)
+    except MediaDownloadError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 @app.post("/convert/upload", response_class=HTMLResponse)
 async def convert_uploaded_video(
@@ -122,4 +167,5 @@ async def upload_page():
 </head><body><h1>Audio transcription</h1>
 <form action="/transcribe" method="post" enctype="multipart/form-data"><h2>Upload audio</h2><input type="file" name="file" required><br><button type="submit">Upload and transcribe</button></form>
 <form action="/convert/upload" method="post" enctype="multipart/form-data"><h2>Upload video</h2><input type="file" name="file" required><br><label>Audio format <select name="output_format"><option>mp3</option><option>wav</option><option>m4a</option></select></label><br><button type="submit">Convert and transcribe</button></form>
+<form action="/convert/url" method="post"><h2>Video URL</h2><input type="url" name="url" placeholder="https://..." required><br><label>Audio format <select name="output_format"><option>mp3</option><option>wav</option><option>m4a</option></select></label><br><button type="submit">Download, convert and transcribe</button></form>
 </body></html>"""
