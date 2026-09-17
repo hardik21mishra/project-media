@@ -44,7 +44,7 @@ def upload_to_drive(file_path):
     result = service.files().create(
         body=file_metadata,
         media_body=media,
-        fields="id, webContentLink",
+        fields="id",
         supportsAllDrives=True,
     ).execute()
 
