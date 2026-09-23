@@ -1,6 +1,7 @@
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from google.auth.transport.requests import Request
+from google.auth.exceptions import RefreshError
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 import os
@@ -17,8 +18,15 @@ def get_drive_credentials():
         credentials = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
 
     if credentials and credentials.expired and credentials.refresh_token:
-        credentials.refresh(Request())
-    elif not credentials or not credentials.valid:
+        try:
+            credentials.refresh(Request())
+        except RefreshError:
+            # The refresh token was revoked or expired; force a fresh login.
+            credentials = None
+            if os.path.exists(TOKEN_FILE):
+                os.remove(TOKEN_FILE)
+
+    if not credentials or not credentials.valid:
         if not os.path.exists(OAUTH_CLIENT_FILE):
             raise RuntimeError(
                 f"Missing {OAUTH_CLIENT_FILE}. Download an OAuth 2.0 Desktop app "

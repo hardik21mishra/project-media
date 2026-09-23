@@ -9,3 +9,6 @@ google-auth
 assemblyai
 groq
 yt-dlp
+gradio
+httpx
+chainlit
