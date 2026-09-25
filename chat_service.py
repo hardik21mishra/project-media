@@ -32,7 +32,6 @@ def chat_reply(
         response["action"] = action
     return response
 
-
 def classify_intent(message: str) -> str:
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
@@ -78,7 +77,6 @@ def ask_groq(conversation_id: str, message: str) -> str:
             *messages[-10:],
         ],
         temperature=0.3,
-        max_tokens=300,
     )
     reply = completion.choices[0].message.content or "How can I help with your media?"
     messages.append({"role": "assistant", "content": reply})

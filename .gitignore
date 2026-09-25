@@ -11,3 +11,5 @@ venv/
 *.mp4
 *.avi
 test_utf8_transcript.py
+chainlit-env
+output

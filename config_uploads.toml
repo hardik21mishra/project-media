@@ -1,0 +1,11 @@
+[features.spontaneous_file_upload]
+enabled = true
+accept = ["audio/*", "video/*", "application/octet-stream"]
+max_files = 1 # The /chat endpoint processes one media file per request.
+max_size_mb = 2048 # Per file, in MiB.
+
+[bot_upload]
+timeout_seconds = 900
+
+[backend]
+request_timeout_seconds = 900
