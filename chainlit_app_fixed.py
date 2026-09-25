@@ -1,6 +1,7 @@
 import asyncio
 from contextvars import copy_context
 import mimetypes
+import logging
 import os
 import re
 import tomllib
@@ -15,6 +16,7 @@ from chainlit.config import FILES_DIRECTORY, SpontaneousFileUploadFeature, confi
 API_BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:8000")
 DEFAULT_OUTPUT_FORMAT = "mp3"
 COMPLETION_NOTIFICATIONS: set[str] = set()
+logger = logging.getLogger(__name__)
 
 UPLOAD_CONFIG_PATH = Path(__file__).resolve().with_name("config_uploads.toml")
 with UPLOAD_CONFIG_PATH.open("rb") as config_file:
@@ -98,8 +100,10 @@ async def post_chat(
 ):
     form_fields: dict[str, Any] = {
         "message": (None, text),
-        "output_format": (None, output_format),
     }
+    # Let the backend remember a format selected in chat. Its default is mp3.
+    if output_format != DEFAULT_OUTPUT_FORMAT:
+        form_fields["output_format"] = (None, output_format)
 
     if conversation_id:
         form_fields["conversation_id"] = (None, conversation_id)
@@ -431,6 +435,10 @@ async def on_message(message: cl.Message):
                 )
             ],
         ).send()
+        logger.info("chat_upload_control conversation=%s displayed=true", cl.user_session.get("conversation_id"))
+        return
+    if isinstance(data, dict) and data.get("status") == "done" and isinstance(data.get("result"), dict):
+        await update_message(assistant_message, f"{initial_reply}\n\n{format_job_result(data)}")
         return
     if job_id and (file_paths or extracted_url):
         await update_message(
