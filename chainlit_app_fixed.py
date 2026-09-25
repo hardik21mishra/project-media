@@ -10,10 +10,11 @@ from typing import Any
 import chainlit as cl
 from chainlit.context import local_steps
 import httpx
-from chainlit.config import SpontaneousFileUploadFeature, config as chainlit_config
+from chainlit.config import FILES_DIRECTORY, SpontaneousFileUploadFeature, config as chainlit_config
 
 API_BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:8000")
 DEFAULT_OUTPUT_FORMAT = "mp3"
+COMPLETION_NOTIFICATIONS: set[str] = set()
 
 UPLOAD_CONFIG_PATH = Path(__file__).resolve().with_name("config_uploads.toml")
 with UPLOAD_CONFIG_PATH.open("rb") as config_file:
@@ -166,7 +167,7 @@ async def update_message(message: cl.Message, content: str) -> None:
     await message.update()
 
 async def poll_job(job_id: str, progress_message: cl.Message):
-    """Poll independently, then replace the progress message with the result."""
+    """Poll independently and append the completed result to the chat."""
     while True:
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
@@ -191,7 +192,10 @@ async def poll_job(job_id: str, progress_message: cl.Message):
                 await asyncio.sleep(2)
                 continue
             if status == "done":
-                await update_message(progress_message, format_job_result(data))
+                if job_id in COMPLETION_NOTIFICATIONS:
+                    return
+                COMPLETION_NOTIFICATIONS.add(job_id)
+                await cl.Message(content=format_job_result(data)).send()
                 return
             if status == "failed":
                 error = data.get(
@@ -303,6 +307,7 @@ async def submit_uploaded_file(file_path: str) -> None:
 
 async def open_bot_upload_ui() -> None:
     """Show the in-chat file picker and process the selected media."""
+    FILES_DIRECTORY.mkdir(parents=True, exist_ok=True)
     try:
         files = await cl.AskFileMessage(
             content=(
@@ -427,7 +432,7 @@ async def on_message(message: cl.Message):
             ],
         ).send()
         return
-    if job_id:
+    if job_id and (file_paths or extracted_url):
         await update_message(
             assistant_message,
             f"{initial_reply}\n\nJob ID: `{job_id}`",
