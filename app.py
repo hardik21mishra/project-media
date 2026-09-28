@@ -43,7 +43,6 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 
 ALLOWED_OUTPUT_FORMATS = {"mp3", "wav", "m4a", "flac", "aac", "ogg", "opus"}
 
-
 def normalize_output_format(output_format: str) -> str:
     output_format = output_format.lower().strip()
     if output_format not in ALLOWED_OUTPUT_FORMATS:
@@ -77,7 +76,6 @@ TARGET_FORMAT_PATTERN = re.compile(
     r"(mp3|wav|m4a|flac|aac|ogg|opus|mp4|wma|aiff)\b", re.I
 )
 
-
 def detect_intents(message: str) -> set[str]:
     """Conservative fallback when the semantic classifier is unavailable."""
     normalized_message = " ".join(message.casefold().split())
@@ -102,7 +100,6 @@ def detect_intents(message: str) -> set[str]:
         intents.add("status")
     return intents
 
-
 def sync_job_context(conversation_id: str, conversation: dict) -> None:
     job = jobs.get(conversation.get("last_job_id"))
     if not job:
@@ -112,7 +109,6 @@ def sync_job_context(conversation_id: str, conversation: dict) -> None:
         event = "The latest media job completed; its files are ready." if status == "done" else "The latest media job failed."
         record_message(conversation_id, "assistant", event)
     conversation["job_status"] = status
-
 
 async def interpret_chat(message: str, conversation: dict, has_media: bool) -> IntentDecision:
     normalized = " ".join(message.casefold().split()).strip(".!?")
@@ -342,7 +338,6 @@ async def chat_endpoint(
         attachment=attachment,
     )
 
-
 def clear_pending_task(conversation: dict) -> None:
     for key in ("pending_task", "pending_output_format", "awaiting_media"):
         conversation.pop(key, None)
@@ -394,7 +389,6 @@ async def convert_uploaded_video(
             status_code=409,
             detail="Another media job is already in process. Please wait for it to finish.",
         )
-
     job_id = uuid4().hex
     job_dir = OUTPUT_DIR / job_id
     job_dir.mkdir()

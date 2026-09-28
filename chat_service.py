@@ -22,18 +22,15 @@ REVIEW_PROMPT = " ".join(
     """.split()
 )
 
-
 @dataclass(frozen=True)
 class IntentDecision:
     intent: str
     output_format: str | None = None
     reply: str | None = None
 
-
 def record_message(conversation_id: str, role: str, content: str) -> None:
     conversation = conversations.setdefault(conversation_id, {"messages": []})
     conversation.setdefault("messages", []).append({"role": role, "content": content})
-
 
 def _application_state(conversation: dict) -> dict:
     return {
@@ -45,10 +42,8 @@ def _application_state(conversation: dict) -> dict:
         "media_attached_this_turn": conversation.get("media_attached_this_turn", False),
     }
 
-
 def conversation_context(conversation: dict) -> str:
     return json.dumps(_application_state(conversation))
-
 
 def _create_completion(client: Groq, messages: list[ChatCompletionMessageParam]):
     return client.chat.completions.create(
@@ -59,13 +54,11 @@ def _create_completion(client: Groq, messages: list[ChatCompletionMessageParam])
         response_format={"type": "json_object"},
     )
 
-
 def _completion_data(completion, error_message: str) -> dict:
     data = json.loads(completion.choices[0].message.content or "{}")
     if not isinstance(data, dict):
         raise ValueError(error_message)
     return data
-
 
 def chat_reply(
     conversation_id: str,
@@ -146,10 +139,8 @@ def classify_request(message: str, conversation: dict | None = None) -> IntentDe
             return IntentDecision("clarification")
     return decision
 
-
 def review_reply(client: Groq, message: str, conversation: dict, decision: IntentDecision) -> IntentDecision:
     """Check what the draft actually offers, independently of its original label.
-
     This is semantic validation of the response, not keyword matching on user text.
     A requested action is rendered by the backend, never executed by this reviewer.
     """
@@ -188,11 +179,9 @@ def review_reply(client: Groq, message: str, conversation: dict, decision: Inten
         return IntentDecision("clarification")
     return decision
 
-
 def classify_intent(message: str, conversation: dict | None = None) -> str:
     """Compatibility helper for callers that only need the intent label."""
     return classify_request(message, conversation).intent
-
 
 def ask_groq(conversation_id: str, message: str) -> str:
     """Compatibility helper; /chat uses the structured decision directly."""

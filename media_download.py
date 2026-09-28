@@ -1,12 +1,9 @@
 from pathlib import Path
 from typing import Any, cast
-
 import yt_dlp
-
 
 class MediaDownloadError(RuntimeError):
     """Raised when a video URL cannot be downloaded into a job directory."""
-
 
 def download_media(url: str, output_dir: Path) -> Path:
     """Download the best available audio stream for one video URL."""

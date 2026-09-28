@@ -398,5 +398,4 @@ async def on_message(message: cl.Message):
         # the user can continue chatting while this job runs.
         await start_job_poll(job_id, assistant_message)
         return
-
     await update_message(assistant_message, initial_reply)
