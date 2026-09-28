@@ -5,7 +5,7 @@ from uuid import uuid4
 import re
 import logging
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, FastAPI, File, UploadFile, Form, HTTPException
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException
 from starlette.concurrency import run_in_threadpool
 from chat_service import IntentDecision, chat_reply, classify_request, record_message
 from file_service import conversations, get_files
@@ -42,6 +42,16 @@ OUTPUT_DIR = BASE_DIR / "output"
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 ALLOWED_OUTPUT_FORMATS = {"mp3", "wav", "m4a", "flac", "aac", "ogg", "opus"}
+
+
+def normalize_output_format(output_format: str) -> str:
+    output_format = output_format.lower().strip()
+    if output_format not in ALLOWED_OUTPUT_FORMATS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported output format. Choose one of: {sorted(ALLOWED_OUTPUT_FORMATS)}",
+        )
+    return output_format
 
 UPLOAD_INTENT_PATTERN = re.compile(
     r"\b(?:upload|attach)\b"
@@ -163,7 +173,6 @@ def get_status_job(conversation: dict):
 
 @app.post("/chat")
 async def chat_endpoint(
-    background_tasks: BackgroundTasks,
     message: str = Form(""),
     conversation_id: str | None = Form(None),
     file: UploadFile | None = File(None),
@@ -341,16 +350,10 @@ def clear_pending_task(conversation: dict) -> None:
 
 @app.post("/convert/url")
 async def convert_video_url(
-    background_tasks: BackgroundTasks,
     url: str = Form(...),
     output_format: str = Form("mp3"),
 ):
-    output_format = output_format.lower().strip()
-    if output_format not in ALLOWED_OUTPUT_FORMATS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unsupported output format. Choose one of: {sorted(ALLOWED_OUTPUT_FORMATS)}",
-        )
+    output_format = normalize_output_format(output_format)
 
     url = validate_media_url(url)
     if has_active_job():
@@ -378,17 +381,10 @@ async def convert_video_url(
 
 @app.post("/convert/upload")
 async def convert_uploaded_video(
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     output_format: str = Form("mp3"),
 ):
-    output_format = output_format.lower().strip()
-
-    if output_format not in ALLOWED_OUTPUT_FORMATS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unsupported output format. Choose one of: {sorted(ALLOWED_OUTPUT_FORMATS)}",
-        )
+    output_format = normalize_output_format(output_format)
 
     if not file.filename:
         raise HTTPException(status_code=400, detail="No filename was provided.")
@@ -426,7 +422,6 @@ async def convert_uploaded_video(
 
 @app.post("/transcribe")
 async def transcribe_endpoint(
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
 ):
     if has_active_job():

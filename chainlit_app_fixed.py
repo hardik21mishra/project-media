@@ -1,4 +1,5 @@
-import asyncio
+﻿import asyncio
+from contextlib import ExitStack
 from contextvars import copy_context
 import mimetypes
 import logging
@@ -7,7 +8,6 @@ import re
 import tomllib
 from pathlib import Path
 from typing import Any
-
 import chainlit as cl
 from chainlit.context import local_steps
 import httpx
@@ -25,6 +25,7 @@ with UPLOAD_CONFIG_PATH.open("rb") as config_file:
 upload_settings = SpontaneousFileUploadFeature.model_validate(
     upload_config["features"]["spontaneous_file_upload"]
 )
+
 if (
     not upload_settings.accept
     or not upload_settings.max_files
@@ -36,6 +37,7 @@ if upload_settings.max_files != 1 or upload_settings.max_size_mb < 1:
 
 UPLOAD_TIMEOUT_SECONDS = upload_config["bot_upload"]["timeout_seconds"]
 REQUEST_TIMEOUT_SECONDS = upload_config["backend"]["request_timeout_seconds"]
+
 if any(
     type(value) is not int or value < 1
     for value in (UPLOAD_TIMEOUT_SECONDS, REQUEST_TIMEOUT_SECONDS)
@@ -46,7 +48,6 @@ if any(
 # when it is disabled. Apply the configured limits with uploads enabled.
 chainlit_config.features.spontaneous_file_upload = upload_settings
 
-# Used by the normal message composer/sidebar upload.
 MEDIA_EXTENSIONS = {
     ".mp3", ".wav", ".m4a", ".flac", ".aac", ".ogg", ".opus",
     ".mp4", ".mov", ".mkv", ".avi", ".webm", ".mpeg", ".mpg",
@@ -62,7 +63,6 @@ URL_REGEX = (
     r"[a-zA-Z0-9()]{1,6}\b"
     r"(?:[-a-zA-Z0-9()@:%_\+.~#?&//=]*)"
 )
-
 # check if the uploaded file is audio or a video
 def is_media_file(path: str, mime: str = "") -> bool:
     mime = (mime or "").lower()
@@ -85,8 +85,7 @@ def extract_file_paths(message: cl.Message) -> list[str]:
             paths.append(str(path))
     return paths
 
-#song.mp3 -> audio/mpeg
-#video.mp4 -> video/mp4
+#song.mp3 -> audio/mpeg, video.mp4 -> video/mp4
 def get_file_mime_type(path: str) -> str:
     mime, _ = mimetypes.guess_type(path)
     return mime or "application/octet-stream"
@@ -104,45 +103,54 @@ async def post_chat(
     # Let the backend remember a format selected in chat. Its default is mp3.
     if output_format != DEFAULT_OUTPUT_FORMAT:
         form_fields["output_format"] = (None, output_format)
-
     if conversation_id:
         form_fields["conversation_id"] = (None, conversation_id)
-
     if extracted_url:
         form_fields["url"] = (None, extracted_url)
 
-    handles = []
-
-    try:
+    with ExitStack() as stack:
         if file_paths:
             path = file_paths[0]
-            fh = open(path, "rb")
-            handles.append(fh)
-
+            file_handle = stack.enter_context(open(path, "rb"))
             form_fields["file"] = (
                 os.path.basename(path),
-                fh,
+                file_handle,
                 get_file_mime_type(path),
             )
 
         async with httpx.AsyncClient(
             timeout=httpx.Timeout(REQUEST_TIMEOUT_SECONDS, connect=10.0)
         ) as client:
-            response = await client.post(
-                f"{API_BASE_URL}/chat",
-                files=form_fields,
-            )
+            response = await client.post(f"{API_BASE_URL}/chat", files=form_fields)
 
         try:
             data = response.json()
         except Exception:
             data = {"detail": response.text}
-
         return response.status_code, data, response.text
 
-    finally:
-        for handle in handles:
-            handle.close()
+async def request_backend(
+    assistant_message: cl.Message,
+    **request: Any,
+) -> tuple[Any, str] | None:
+    try:
+        status_code, data, response_text = await post_chat(**request)
+    except Exception as exc:
+        await update_message(assistant_message, f"Network Error: {exc}")
+        return None
+
+    if status_code != 200:
+        detail = (
+            data.get("detail", response_text)
+            if isinstance(data, dict)
+            else response_text
+        )
+        await update_message(assistant_message, f"Backend Error: {detail}")
+        return None
+
+    if isinstance(data, dict) and data.get("conversation_id"):
+        cl.user_session.set("conversation_id", data["conversation_id"])
+    return data, data.get("reply", "Processing...") if isinstance(data, dict) else "Processing..."
 
 def format_job_result(job_data: dict[str, Any]) -> str:
     result = job_data.get("result")
@@ -247,70 +255,38 @@ async def start_job_poll(job_id: str, progress_message: cl.Message) -> None:
 
 async def submit_uploaded_file(file_path: str) -> None:
     conversation_id = cl.user_session.get("conversation_id")
-
     assistant_message = cl.Message(
         content=f"Upload received: `{os.path.basename(file_path)}`\n\n"
                 "I’m sending it to the processor now..."
     )
     await assistant_message.send()
 
-    try:
-        status_code, data, response_text = await post_chat(
-            text="",
-            output_format=DEFAULT_OUTPUT_FORMAT,
-            conversation_id=conversation_id,
-            file_paths=[file_path],
-            extracted_url=None,
-        )
-
-    except Exception as exc:
-        await update_message(
-            assistant_message,
-            f"Network Error: {exc}",
-        )
-        return
-
-    if status_code != 200:
-        detail = (
-            data.get("detail", response_text)
-            if isinstance(data, dict)
-            else response_text
-        )
-
-        await update_message(
-            assistant_message,
-            f"Backend Error: {detail}",
-        )
-        return
-
-    if isinstance(data, dict):
-        cl.user_session.set(
-            "conversation_id",
-            data.get("conversation_id", conversation_id),
-        )
-
-    initial_reply = (
-        data.get("reply", "Processing...")
-        if isinstance(data, dict)
-        else "Processing..."
+    result = await request_backend(
+        assistant_message,
+        text="",
+        output_format=DEFAULT_OUTPUT_FORMAT,
+        conversation_id=conversation_id,
+        file_paths=[file_path],
+        extracted_url=None,
     )
+    if result is None:
+        return
 
+    data, initial_reply = result
     job_id = data.get("job_id") if isinstance(data, dict) else None
 
     if job_id:
         await update_message(
             assistant_message,
-            f"⏳ **{initial_reply}**\n\n*Job ID:* `{job_id}`",
+            f"{initial_reply}\n\nJob ID: `{job_id}`",
         )
 
         # Do not await: the user can continue chatting while this job runs.
         await start_job_poll(job_id, assistant_message)
         return
-
     await update_message(assistant_message, initial_reply)
 
 async def open_bot_upload_ui() -> None:
-    """Show the in-chat file picker and process the selected media."""
     FILES_DIRECTORY.mkdir(parents=True, exist_ok=True)
     try:
         files = await cl.AskFileMessage(
@@ -338,7 +314,6 @@ async def open_bot_upload_ui() -> None:
     if not selected_file.path:
         await cl.Message(content="Upload Error: Chainlit returned no file path.").send()
         return
-
     await submit_uploaded_file(str(selected_file.path))
 
 @cl.action_callback("request_media_upload")
@@ -367,62 +342,36 @@ async def on_message(message: cl.Message):
     extracted_url = None
     if text:
         match = re.search(URL_REGEX, text)
-
         if match:
             extracted_url = match.group(0)
 
     assistant_message = cl.Message(content="Thinking...")
     await assistant_message.send()
 
-    try:
-        status_code, data, response_text = await post_chat(
-            text=text,
-            output_format=DEFAULT_OUTPUT_FORMAT,
-            conversation_id=conversation_id,
-            file_paths=file_paths,
-            extracted_url=extracted_url,
-        )
-
-    except Exception as exc:
-        await update_message(
-            assistant_message,
-            f"Network Error: {exc}",
-        )
-        return
-
-    if status_code != 200:
-        detail = (
-            data.get("detail", response_text)
-            if isinstance(data, dict)
-            else response_text
-        )
-
-        await update_message(
-            assistant_message,
-            f"Backend Error: {detail}",
-        )
-        return
-
-    if isinstance(data, dict):
-        cl.user_session.set(
-            "conversation_id",
-            data.get("conversation_id", conversation_id),
-        )
-
-    initial_reply = (
-        data.get("reply", "Processing...")
-        if isinstance(data, dict)
-        else "Processing..."
+    result = await request_backend(
+        assistant_message,
+        text=text,
+        output_format=DEFAULT_OUTPUT_FORMAT,
+        conversation_id=conversation_id,
+        file_paths=file_paths,
+        extracted_url=extracted_url,
     )
+    if result is None:
+        return
 
-    action = data.get("action") if isinstance(data, dict) else None
-    job_id = data.get("job_id") if isinstance(data, dict) else None
+    data, initial_reply = result
+    if not isinstance(data, dict):
+        await update_message(assistant_message, initial_reply)
+        return
+
+    action = data.get("action")
+    job_id = data.get("job_id")
 
     if action == "open_upload":
         await update_message(assistant_message, initial_reply)
         await cl.Message(
             content=(
-                "📁 Upload your media\n"
+                "Upload your media\n"
                 "Choose one audio or video file when you’re ready. "
                 "You can keep chatting without uploading one."
             ),
@@ -437,6 +386,7 @@ async def on_message(message: cl.Message):
         ).send()
         logger.info("chat_upload_control conversation=%s displayed=true", cl.user_session.get("conversation_id"))
         return
+    
     if isinstance(data, dict) and data.get("status") == "done" and isinstance(data.get("result"), dict):
         await update_message(assistant_message, f"{initial_reply}\n\n{format_job_result(data)}")
         return
